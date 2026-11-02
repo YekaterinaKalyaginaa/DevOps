@@ -1,53 +1,84 @@
-const { chromium } = require("playwright"); // подключаем Playwright и берем из него Chromium
-const fs = require("fs"); // подключаем встроенный модуль Node.js для работы с файлами
 
-async function main() { // асинхронная функция, Playwright выполняет операции, которые требуют ожидания
+const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 
-    const browser = await chromium.launch({ headless: true }); // запускаем Chromium; false означает, что браузер будет отображаться в отдельном окне
+async function main() {
+    const browser = await chromium.launch({ headless: true });
 
-    const page = await browser.newPage(); // создаём новую вкладку браузера
+    try {
+        const page = await browser.newPage();
 
-    await page.goto("https://quotes.toscrape.com/scroll"); // переходим на страницу из задания
-
-    const quote = page.locator(".quote"); // находим все элементы с классом .quote
-
-    const count = await quote.count(); // узнаём количество найденных цитат
-
-    console.log("Количество цитат:", count);
-
-    const results = []; // создаём пустой массив, в который будем сохранять все цитаты
-
-    for (let i = 0; i < count; i++) { // перебираем все цитаты по очереди
-
-        const currentQuote = quote.nth(i); // берём конкретную цитату по её номеру
-
-        console.log("Цитата №", i + 1);
-
-        const text = await currentQuote.locator(".text").textContent(); // получаем текст цитаты
-
-        const author = await currentQuote.locator(".author").textContent(); // получаем автора
-
-        const tags = await currentQuote.locator(".tag").allTextContents(); // получаем все теги
-
-        console.log("Цитата:", text);
-        console.log("Автор:", author);
-        console.log("Теги:", tags);
-
-        results.push({ // добавляем полученную цитату в массив результатов
-            text: text,
-            author: author,
-            tags: tags
+        console.log('Открываем сайт...');
+        await page.goto('https://quotes.toscrape.com/scroll', {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
         });
+
+        const allQuotes = new Map(); //уникальные цитаты 
+        let previousCount = 0;//запоминает число цитат на предыдущей итерации 
+        let stableRounds = 0;//Считает последовательные проверки без новых цитат
+
+        console.log('Начинаем сбор цитат с прокруткой...');
+
+        while (stableRounds < 3) {
+            // Собираем все цитаты, которые уже появились на странице
+            const currentQuotes = await page.locator('.quote').evaluateAll(elements =>
+                elements.map(element => ({
+                    text: element.querySelector('.text')?.innerText.trim() ?? '',
+                    author: element.querySelector('.author')?.innerText.trim() ?? '',
+                    tags: Array.from(element.querySelectorAll('.tags .tag'))
+                        .map(tag => tag.innerText.trim())
+                }))
+            );
+
+            // Добавляем цитаты в коллекцию без повторов
+            for (const quote of currentQuotes) {
+                if (quote.text) {
+                    allQuotes.set(quote.text, quote);
+                }
+            }
+
+            console.log(`Собрано уникальных цитат: ${allQuotes.size}`);
+
+            if (allQuotes.size === previousCount) {
+                stableRounds++;
+            } else {
+                stableRounds = 0;
+            }
+
+            previousCount = allQuotes.size;
+
+            // Прокручиваем страницу вниз, чтобы подгрузились новые цитаты
+            await page.evaluate(() => {
+                window.scrollTo(0, document.body.scrollHeight);
+            });
+
+            // Даём сайту время загрузить новые данные
+            await page.waitForTimeout(1200);
+        }
+
+        const quotes = Array.from(allQuotes.values());
+
+        if (quotes.length === 0) {
+            throw new Error('Цитаты не найдены. Проверь доступность сайта и селекторы.');
+        }
+
+        const outputDir = path.join(__dirname, '..', 'out');
+        const outputFile = path.join(outputDir, 'result.json');
+
+        fs.mkdirSync(outputDir, { recursive: true });
+        fs.writeFileSync(outputFile, JSON.stringify(quotes, null, 2), 'utf8');
+
+        console.log(`\nСбор завершён. Всего уникальных цитат: ${quotes.length}`);
+        console.log(`Результат сохранён в ${outputFile}`);
+
+    } finally {
+        await browser.close();
     }
-
-    console.log(results); // выводим весь массив с собранными цитатами
-
-    const json = JSON.stringify(results, null, 2); // превращаем JavaScript-массив в строку JSON
-    fs.mkdirSync("out", { recursive: true });
-
-    fs.writeFileSync("out/result.json", json); // записываем JSON в файл
-
-    await browser.close(); // закрываем браузер после выполнения
 }
 
-main();
+main().catch(error => {
+    console.error('Ошибка при сборе цитат:', error);
+    process.exitCode = 1;
+});

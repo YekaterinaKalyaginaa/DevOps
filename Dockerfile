@@ -8,17 +8,7 @@ COPY package*.json ./
 RUN npm ci
 
 
-# Стадия 2: независимо скачиваем Chromium
-FROM node:22-bookworm AS browser
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci
-RUN npx playwright install chromium
-
-
-# Стадия 3: собираем финальный образ
+# Стадия 2: готовим окружение для запуска
 FROM node:22-bookworm AS runtime
 
 WORKDIR /app
@@ -29,8 +19,8 @@ COPY --from=dependencies /app/node_modules ./node_modules
 # Устанавливаем системные библиотеки для Chromium
 RUN npx playwright install-deps chromium
 
-# Переносим браузер из стадии browser
-COPY --from=browser /root/.cache/ms-playwright /root/.cache/ms-playwright
+# Скачиваем Chromium с помощью установленного Playwright
+RUN npx playwright install chromium
 
 # Код копируем последним для эффективного кэширования
 COPY src ./src
