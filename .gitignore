@@ -24,3 +24,6 @@ terraform-provider-aws*.exe
 
 # Temporary files
 *.backup.js
+
+# Downloaded scraper results
+downloads/
