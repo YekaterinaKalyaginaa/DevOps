@@ -1,0 +1,25 @@
+
+services:
+  floci:
+    image: floci/floci:2.2.0
+    container_name: devops-floci
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,sqs
+      DEFAULT_REGION: us-east-1
+
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      S3_ENDPOINT: http://floci:4566
+      SQS_ENDPOINT: http://floci:4566
+      S3_BUCKET: quotes-results
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL:-http://floci:4566/000000000000/quotes-jobs}
+    depends_on:
+      - floci

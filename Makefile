@@ -1,17 +1,34 @@
 
-.PHONY: build run clean ci
+.PHONY: build provision deploy run clean destroy ci
 
 IMAGE_NAME := quotes-scraper
 
 build:
 	docker build --progress=plain -t $(IMAGE_NAME) .
 
+provision:
+	docker compose up -d floci
+	terraform -chdir=infra init
+	terraform -chdir=infra apply -auto-approve
+
+deploy:
+	docker compose build scraper
+
 run:
-	docker run --rm -v "$(CURDIR)/out:/app/out" $(IMAGE_NAME)
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run.ps1
 
 clean:
-	docker image rm $(IMAGE_NAME)
+	docker compose down --remove-orphans
+	docker image rm $(IMAGE_NAME) 2>/dev/null || true
 	node -e "require('fs').rmSync('out', { recursive: true, force: true })"
 
-ci: build run
-	node -e "const fs=require('fs'); const p='out/result.json'; if (!fs.existsSync(p) || fs.statSync(p).size===0) process.exit(1); const data=JSON.parse(fs.readFileSync(p,'utf8')); if (!Array.isArray(data) || data.length===0) process.exit(1); console.log('Проверка пройдена. Цитат:', data.length)"
+destroy:
+	terraform -chdir=infra destroy -auto-approve
+	docker compose down --remove-orphans
+
+ci:
+	terraform -chdir=infra fmt -check -recursive
+	terraform -chdir=infra init -backend=false
+	terraform -chdir=infra validate
+	terraform -chdir=infra plan -refresh=false -input=false
+	docker compose build scraper

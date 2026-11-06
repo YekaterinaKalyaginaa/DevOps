@@ -1,2 +1,26 @@
+# Node.js
 node_modules/
 out/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Local Terraform configuration
+terraform.rc
+.terraformrc
+
+# Local provider source and binaries
+aws-provider-source/
+terraform-provider-aws*.exe
+
+# Environment and secrets
+.env
+.env.*
+
+# Temporary files
+*.backup.js

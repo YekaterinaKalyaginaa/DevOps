@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feat/quotes-scrapper
+      - feat/terraform-infra
   pull_request:
     branches:
       - main
@@ -22,6 +23,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+
+      - name: Add provider checksums
+        working-directory: infra
+        run: terraform providers lock -platform=linux_amd64 -platform=windows_amd64
 
       - name: Run project checks
         run: make ci

@@ -1,9 +1,34 @@
-
 const { chromium } = require('playwright');
-const fs = require('fs');
-const path = require('path');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const {
+    SQSClient,
+    ReceiveMessageCommand,
+    DeleteMessageCommand
+} = require('@aws-sdk/client-sqs');
 
-async function main() {
+const s3 = new S3Client({
+    region: process.env.AWS_REGION || 'us-east-1',
+    endpoint: process.env.S3_ENDPOINT,
+    forcePathStyle: true,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test'
+    }
+});
+
+const sqs = new SQSClient({
+    region: process.env.AWS_REGION || 'us-east-1',
+    endpoint: process.env.SQS_ENDPOINT,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test'
+    }
+});
+
+const BUCKET_NAME = process.env.S3_BUCKET;
+const QUEUE_URL = process.env.SQS_QUEUE_URL;
+
+async function scrapeQuotes() {
     const browser = await chromium.launch({ headless: true });
 
     try {
@@ -64,21 +89,68 @@ async function main() {
             throw new Error('Цитаты не найдены. Проверь доступность сайта и селекторы.');
         }
 
-        const outputDir = path.join(__dirname, '..', 'out');
-        const outputFile = path.join(outputDir, 'result.json');
+        console.log(`Сбор завершён. Всего цитат: ${quotes.length}`);
 
-        fs.mkdirSync(outputDir, { recursive: true });
-        fs.writeFileSync(outputFile, JSON.stringify(quotes, null, 2), 'utf8');
-
-        console.log(`\nСбор завершён. Всего уникальных цитат: ${quotes.length}`);
-        console.log(`Результат сохранён в ${outputFile}`);
+        return quotes;
 
     } finally {
         await browser.close();
     }
 }
 
-main().catch(error => {
-    console.error('Ошибка при сборе цитат:', error);
+async function saveToS3(quotes) {
+    if (!process.env.S3_ENDPOINT) {
+    throw new Error('Не задана переменная S3_ENDPOINT');
+    }
+    if (!BUCKET_NAME) {
+        throw new Error('Не задана переменная S3_BUCKET');
+    }
+
+    const key = `quotes-${Date.now()}.json`;
+
+    await s3.send(new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        Body: JSON.stringify(quotes, null, 2),
+        ContentType: 'application/json'
+    }));
+
+    console.log(`Результат сохранён в S3: ${key}`);
+}
+
+async function processJob() {
+    if (!QUEUE_URL) {
+        throw new Error('Не задана переменная SQS_QUEUE_URL');
+    }
+
+    const response = await sqs.send(new ReceiveMessageCommand({
+        QueueUrl: QUEUE_URL,
+        MaxNumberOfMessages: 1,
+        WaitTimeSeconds: 10
+    }));
+
+    if (!response.Messages || response.Messages.length === 0) {
+        console.log('В очереди нет заданий');
+        return;
+    }
+
+    const message = response.Messages[0];
+
+    console.log('Получено задание из SQS');
+
+    const quotes = await scrapeQuotes();
+
+    await saveToS3(quotes);
+
+    await sqs.send(new DeleteMessageCommand({
+        QueueUrl: QUEUE_URL,
+        ReceiptHandle: message.ReceiptHandle
+    }));
+
+    console.log('Задание успешно обработано и удалено из SQS');
+}
+
+processJob().catch(error => {
+    console.error('Ошибка при обработке задания:', error);
     process.exitCode = 1;
 });
